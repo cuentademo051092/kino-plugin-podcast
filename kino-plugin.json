@@ -1,0 +1,31 @@
+{
+  "id": "podcasts-latam",
+  "name": "Podcasts en español",
+  "version": "0.1.0",
+  "apiVersion": 4,
+  "entry": "plugin.js",
+  "description": "Podcasts gratis en español, sobre todo de Latinoamérica y también de España: noticias, historia y misterio, comedia, tecnología y ciencia. Busca cualquier podcast y escucha o descarga sus episodios.",
+  "hosts": [
+    "itunes.apple.com",
+    "feeds.megaphone.fm",
+    "feeds.simplecast.com",
+    "feeds.buzzsprout.com",
+    "rss.art19.com",
+    "feeds.acast.com",
+    "rss.libsyn.com",
+    "feed.podbean.com",
+    "anchor.fm",
+    "feeds.captivate.fm",
+    "feeds.transistor.fm",
+    "feeds.redcircle.com",
+    "feeds.soundcloud.com",
+    "feeds.feedburner.com",
+    "www.omnycontent.com",
+    "audioboom.com",
+    "api.spreaker.com",
+    "www.ivoox.com"
+  ],
+  "streamHosts": "any",
+  "capabilities": ["search", "home", "browse", "episodes", "resolve", "download"],
+  "color": "#7B3FE4"
+}
