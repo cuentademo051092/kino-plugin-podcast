@@ -1,10 +1,10 @@
 {
   "id": "podcasts-latam",
   "name": "Podcasts en español",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 4,
   "entry": "plugin.js",
-  "description": "Podcasts gratis en español, sobre todo de Latinoamérica y también de España: noticias, historia y misterio, comedia, tecnología y ciencia. Busca cualquier podcast y escucha o descarga sus episodios.",
+  "description": "Podcasts gratis en español, sobre todo de Latinoamérica y también de España. Solo programas activos: noticias, política, historia, misterio, ciencia, comedia, cine y tecnología. Busca cualquier podcast y escucha o descarga sus episodios.",
   "hosts": [
     "itunes.apple.com",
     "feeds.megaphone.fm",
@@ -26,6 +26,31 @@
     "www.ivoox.com"
   ],
   "streamHosts": "any",
-  "capabilities": ["search", "home", "browse", "episodes", "resolve", "download"],
-  "color": "#7B3FE4"
+  "capabilities": [
+    "search",
+    "home",
+    "browse",
+    "episodes",
+    "resolve",
+    "download"
+  ],
+  "color": "#7B3FE4",
+  "settings": [
+    {
+      "key": "inicio",
+      "label": "Qué mostrar en Inicio",
+      "type": "select",
+      "default": "reciente",
+      "options": [
+        {
+          "value": "reciente",
+          "label": "Solo la fila «Más recientes»"
+        },
+        {
+          "value": "temas",
+          "label": "«Más recientes» y todos los temas"
+        }
+      ]
+    }
+  ]
 }
