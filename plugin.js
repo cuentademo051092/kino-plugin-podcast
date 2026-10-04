@@ -1,28 +1,21 @@
-// Podcasts en español (v0.2.0).
+// Podcasts en español (v0.1.0).
 // Catálogo: rankings y búsqueda públicos de Apple Podcasts (itunes.apple.com).
-// Episodios: primero la lista de Apple (rápida y sin límite de tamaño); si no hay, el RSS del propio podcast.
-// Solo se muestran programas activos: con un episodio nuevo en los últimos DIAS_ACTIVO días.
+// Episodios: el RSS público de cada podcast, que es lo que publica su propio creador.
 
 const APPLE = "https://itunes.apple.com";
 const SEIS_HORAS = 6 * 60 * 60 * 1000;
-const DIEZ_MINUTOS = 10 * 60 * 1000;
 const POR_PAGINA = 100;
 const MAX_EPISODIOS = 1000;
-const DIAS_ACTIVO = 120;
 
-// Temas que aparecen como bloques en Categorías. "apple" es el número de género de Apple Podcasts.
+// Temas que se ven en Inicio. "apple" son los números de género de Apple Podcasts:
+// 1489 Noticias, 1487 Historia, 1488 Crimen real, 1303 Comedia, 1309 TV y cine,
+// 1318 Tecnología, 1533 Ciencia.
 const TEMAS = [
-  { id: "noticias", titulo: "Noticias y actualidad", genre: "noticias", apple: 1489 },
-  { id: "politica", titulo: "Política", genre: "noticias", apple: 1527 },
-  { id: "historia", titulo: "Historia", genre: "documentales", apple: 1487 },
-  { id: "misterio", titulo: "Misterio y crimen real", genre: "documentales", apple: 1488 },
-  { id: "ciencia", titulo: "Ciencia", genre: "documentales", apple: 1533 },
-  { id: "comedia", titulo: "Comedia", genre: "entretenimiento", apple: 1303 },
-  { id: "cine", titulo: "Cine y TV", genre: "entretenimiento", apple: 1309 },
-  { id: "sociedad", titulo: "Sociedad y cultura", genre: "entretenimiento", apple: 1324 },
-  { id: "tecnologia", titulo: "Tecnología", genre: "otros", apple: 1318 },
+  { id: "noticias", titulo: "Noticias y actualidad", genre: "noticias", apple: [1489] },
+  { id: "historia", titulo: "Historia y misterio", genre: "documentales", apple: [1487, 1488] },
+  { id: "comedia", titulo: "Comedia y entretenimiento", genre: "entretenimiento", apple: [1303, 1309] },
+  { id: "tecnologia", titulo: "Tecnología y ciencia", genre: "otros", apple: [1318, 1533] },
 ];
-const RECIENTES = { id: "recientes", titulo: "Más recientes", genre: "entretenimiento" };
 
 // Países cuyos rankings se mezclan. Latinoamérica pesa más: España entra con la mitad de sus podcasts.
 const PAISES_INICIO = ["mx", "co", "ar"];
@@ -30,25 +23,14 @@ const PAISES_VER_MAS = ["bo", "mx", "co", "ar", "cl", "pe", "es"];
 const MEDIO_PESO = ["es"];
 const PAISES_BUSQUEDA = ["MX", "AR", "CO", "ES"];
 
-// Memoria de corta vida mientras el plugin sigue abierto (los datos más pesados no van al almacenamiento).
-const memoria = {};
-
-function deMemoria(clave) {
-  const m = memoria[clave];
-  return m && Date.now() - m.hora < DIEZ_MINUTOS ? m.datos : null;
-}
-
-function aMemoria(clave, datos) {
-  memoria[clave] = { hora: Date.now(), datos };
-}
-
 // ---------- Utilidades ----------
 
 // Ejecuta las tareas de a pocas a la vez (Kino permite 6 peticiones en vuelo).
 async function enLotes(tareas, tamano) {
   const salida = [];
   for (let i = 0; i < tareas.length; i += tamano) {
-    const resultados = await Promise.all(tareas.slice(i, i + tamano).map((t) => t()));
+    const lote = tareas.slice(i, i + tamano).map((t) => t());
+    const resultados = await Promise.all(lote);
     for (const r of resultados) salida.push(r);
   }
   return salida;
@@ -83,27 +65,8 @@ function sinRepetir(podcasts) {
 function aItem(p) {
   const item = { id: "p" + p.id, ref: p.id, title: p.nombre.slice(0, 200), kind: "series" };
   if (/^https?:\/\//i.test(p.img || "")) item.poster = p.img;
-  const partes = [];
-  if (p.fecha) partes.push("Último episodio: " + p.fecha);
-  if (p.artista) partes.push(p.artista);
-  if (partes.length) item.overview = partes.join(" · ").slice(0, 300);
+  if (p.artista) item.overview = String(p.artista).slice(0, 300);
   return item;
-}
-
-function corteDeActividad() {
-  return new Date(Date.now() - DIAS_ACTIVO * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-// Un programa sin fecha conocida se deja pasar: sin datos no se puede decir que esté abandonado.
-function esActivo(fecha) {
-  return !fecha || fecha >= corteDeActividad();
-}
-
-function porFechaDesc(a, b) {
-  if (a.fecha === b.fecha) return 0;
-  if (!a.fecha) return 1;
-  if (!b.fecha) return -1;
-  return a.fecha < b.fecha ? 1 : -1;
 }
 
 // ---------- Rankings de Apple ----------
@@ -144,141 +107,46 @@ async function pedirRanking(pais, genero, cuantos) {
   }
 }
 
-function mezclarPaises(listasPorPais, paises) {
+// Los podcasts de un tema, mezclando los rankings de varios países.
+async function podcastsDelTema(tema, paises, cuantos) {
+  const tareas = [];
+  const claves = [];
+  for (const pais of paises) {
+    for (const genero of tema.apple) {
+      claves.push(pais);
+      tareas.push(() => pedirRanking(pais, genero, cuantos));
+    }
+  }
+  const resultados = await enLotes(tareas, 6);
+  const porPais = paises.map((pais) => intercalar(resultados.filter((_, i) => claves[i] === pais)));
   const medias = new Set();
   paises.forEach((pais, i) => {
     if (MEDIO_PESO.includes(pais)) medias.add(i);
   });
-  return sinRepetir(intercalar(listasPorPais, medias));
+  return sinRepetir(intercalar(porPais, medias));
 }
 
-// Lo que se guarda en el almacenamiento es poco: 30 programas por tema.
-function leerGuardado(clave) {
-  const g = kino.storage.get(clave);
-  if (typeof g !== "string") return null;
-  try {
-    const filas = JSON.parse(g);
-    if (!Array.isArray(filas) || !filas.length) return null;
-    return filas.map((f) => ({ id: f[0], nombre: f[1], img: f[2], artista: f[3] }));
-  } catch (e) {
-    kino.log("No pude leer " + clave + ": " + e);
-    return null;
-  }
-}
-
-function escribirGuardado(clave, lista) {
-  const filas = lista.slice(0, 30).map((p) => [p.id, p.nombre, p.img, p.artista]);
-  kino.storage.set(clave, JSON.stringify(filas), { ttlMs: SEIS_HORAS });
-}
-
-// Los rankings de varios temas a la vez, de a 6 peticiones. Si se acaba el tiempo, los temas que
-// faltan se omiten y se completan en la próxima vez (lo ya leído queda guardado).
-async function cargarTemas(temas, paises, cuantos, prefijo, limiteMs) {
-  const resultado = {};
-  const pendientes = [];
-  for (const tema of temas) {
-    const guardado = leerGuardado(prefijo + tema.id);
-    if (guardado) resultado[tema.id] = guardado;
-    else pendientes.push(tema);
-  }
-  const tareas = [];
-  for (const tema of pendientes) for (const pais of paises) tareas.push({ tema, pais });
-  const leidos = {};
-  const inicio = Date.now();
-  for (let i = 0; i < tareas.length; i += 6) {
-    if (Date.now() - inicio > limiteMs) break;
-    const lote = tareas.slice(i, i + 6);
-    const listas = await Promise.all(lote.map((t) => pedirRanking(t.pais, t.tema.apple, cuantos)));
-    lote.forEach((t, j) => {
-      if (!leidos[t.tema.id]) leidos[t.tema.id] = {};
-      leidos[t.tema.id][t.pais] = listas[j];
-    });
-  }
-  for (const tema of pendientes) {
-    const porPais = leidos[tema.id];
-    if (!porPais) continue;
-    const completo = paises.every((p) => porPais[p]);
-    const lista = mezclarPaises(paises.map((p) => porPais[p] || []), paises);
-    resultado[tema.id] = lista;
-    if (completo && lista.length) escribirGuardado(prefijo + tema.id, lista);
-  }
-  return resultado;
-}
-
-// ---------- Actividad: cuándo salió el último episodio de cada programa ----------
-
-async function pedirFichas(ids) {
-  try {
-    const r = await kino.fetch(APPLE + "/lookup?entity=podcast&id=" + ids.join(","), {
-      headers: { Accept: "application/json" },
-      timeoutMs: 8000,
-    });
-    if (!r.ok) return null;
-    const datos = r.json();
-    return (datos && datos.results) || [];
-  } catch (e) {
-    kino.log("Falló la consulta de actividad: " + (e && e.code ? e.code : e));
-    return null;
-  }
-}
-
-// Devuelve { idDelPodcast: "AAAA-MM-DD" } con la fecha de su último episodio ("" si no se supo).
-async function actividad(ids) {
-  let mapa = {};
-  const guardado = kino.storage.get("actividad");
+// Guarda el resultado de cada tema unas horas para no repetir las mismas peticiones.
+async function temaConMemoria(tema, clave, paises, cuantos) {
+  const guardado = kino.storage.get(clave);
   if (typeof guardado === "string") {
     try {
-      mapa = JSON.parse(guardado) || {};
+      const filas = JSON.parse(guardado);
+      if (Array.isArray(filas) && filas.length) {
+        return filas.map((f) => ({ id: f[0], nombre: f[1], img: f[2], artista: f[3] }));
+      }
     } catch (e) {
-      mapa = {};
+      kino.log("La memoria de " + clave + " no se pudo leer: " + e);
     }
   }
-  const faltan = ids.filter((id) => !(id in mapa));
-  if (!faltan.length) return mapa;
-  const lotes = [];
-  for (let i = 0; i < faltan.length; i += 150) lotes.push(faltan.slice(i, i + 150));
-  const respuestas = await enLotes(lotes.map((l) => () => pedirFichas(l)), 6);
-  let aprendio = false;
-  respuestas.forEach((fichas, k) => {
-    if (fichas === null) return; // falló: se vuelve a intentar la próxima vez
-    aprendio = true;
-    for (const f of fichas) {
-      if (f && f.collectionId) mapa[String(f.collectionId)] = String(f.releaseDate || "").slice(0, 10);
-    }
-    for (const id of lotes[k]) if (!(id in mapa)) mapa[id] = "";
-  });
-  if (aprendio) {
-    if (Object.keys(mapa).length > 1200) {
-      const reducido = {};
-      for (const id of ids) if (id in mapa) reducido[id] = mapa[id];
-      mapa = reducido;
-    }
-    kino.storage.set("actividad", JSON.stringify(mapa), { ttlMs: SEIS_HORAS });
+  const lista = await podcastsDelTema(tema, paises, cuantos);
+  if (lista.length) {
+    kino.storage.set(clave, JSON.stringify(lista.map((p) => [p.id, p.nombre, p.img, p.artista])), { ttlMs: SEIS_HORAS });
   }
-  return mapa;
+  return lista;
 }
 
-// Marca cada programa con la fecha de su último episodio y deja solo los activos.
-async function soloActivos(lista) {
-  const mapa = await actividad(lista.map((p) => p.id));
-  const salida = [];
-  for (const p of lista) {
-    const fecha = mapa[p.id] || "";
-    if (esActivo(fecha)) salida.push(Object.assign({}, p, { fecha }));
-  }
-  return salida;
-}
-
-// Todos los programas activos de todos los temas, del episodio más nuevo al más viejo.
-async function listaDeRecientes() {
-  const porTema = await cargarTemas(TEMAS, PAISES_INICIO, 20, "i-", 10000);
-  const todos = [];
-  for (const tema of TEMAS) for (const p of porTema[tema.id] || []) todos.push(p);
-  const activos = await soloActivos(sinRepetir(todos));
-  return { porTema, activos, recientes: activos.filter((p) => p.fecha).sort(porFechaDesc) };
-}
-
-// ---------- XML del RSS (solo como respaldo) ----------
+// ---------- XML del RSS ----------
 
 function decodificar(texto) {
   return texto
@@ -354,105 +222,31 @@ function leerFeed(xml) {
   return { serie, episodios };
 }
 
-// ---------- Episodios ----------
-
-// Los 200 episodios más nuevos según Apple: no depende del servidor del podcast ni del tamaño de su RSS.
-async function episodiosDeApple(id) {
-  const r = await kino.fetch(APPLE + "/lookup?entity=podcastEpisode&limit=200&id=" + id, {
-    headers: { Accept: "application/json" },
-    timeoutMs: 10000,
-  });
-  if (!r.ok) throw kino.error("unavailable", "Apple respondió " + r.status);
-  const resultados = ((r.json() || {}).results) || [];
-  const ficha = resultados.find((x) => x && x.kind === "podcast") || null;
-  const episodios = [];
-  for (const x of resultados) {
-    const esEpisodio = x && (x.kind === "podcast-episode" || x.wrapperType === "podcastEpisode");
-    const url = String((x && x.episodeUrl) || "").replace(/^http:/i, "https:");
-    if (!esEpisodio || !/^https:\/\//i.test(url) || url.length > 3000) continue;
-    const imagen = String(x.artworkUrl600 || x.artworkUrl160 || "");
-    episodios.push({
-      url,
-      titulo: limpiar(x.trackName || "").slice(0, 200) || "Episodio",
-      fecha: String(x.releaseDate || "").slice(0, 10),
-      minutos: x.trackTimeMillis ? Math.max(1, Math.round(Number(x.trackTimeMillis) / 60000)) : 0,
-      resumen: limpiar(x.description || x.shortDescription || "").slice(0, 300),
-      imagen: /^https?:\/\//i.test(imagen) ? imagen : "",
-    });
-  }
-  return {
-    serie: {
-      title: ficha && ficha.collectionName ? String(ficha.collectionName) : "",
-      overview: "",
-      poster: ficha && ficha.artworkUrl600 ? String(ficha.artworkUrl600) : "",
-    },
-    episodios,
-    feedUrl: ficha && ficha.feedUrl ? String(ficha.feedUrl).replace(/^http:/i, "https:") : "",
-  };
-}
-
-// Respaldo: el RSS del propio podcast (puede pedir permiso para un servidor nuevo).
-async function episodiosDelFeed(feedUrl) {
-  let respuesta;
-  try {
-    respuesta = await kino.fetch(feedUrl, {
-      headers: { Accept: "application/rss+xml, application/xml, text/xml, */*", "User-Agent": "Kino-Podcasts/0.2" },
-      timeoutMs: 15000,
-    });
-  } catch (e) {
-    const codigo = e && e.code ? e.code : "";
-    kino.log("No pude abrir el RSS: " + codigo);
-    throw kino.error("unavailable", codigo === "too_large" ? "el RSS pesa demasiado" : "no pude abrir el RSS (" + codigo + ")");
-  }
-  if (!respuesta.ok) throw kino.error("unavailable", "el RSS respondió " + respuesta.status);
-  return leerFeed(respuesta.text());
-}
-
 // ---------- Lo que Kino llama ----------
 
 export async function home() {
   await null;
-  const modo = kino.config.get("inicio") === "temas" ? "temas" : "reciente";
-  const { porTema, activos, recientes } = await listaDeRecientes();
-  if (!recientes.length && !activos.length) throw kino.error("unavailable", "no pude leer los rankings de Apple");
-  const base = recientes.length ? recientes : activos;
-  const filas = [
-    {
-      id: RECIENTES.id,
-      title: RECIENTES.titulo,
-      genre: RECIENTES.genre,
-      ref: RECIENTES.id,
-      items: base.slice(0, 40).map(aItem),
-    },
-  ];
-  if (modo === "temas") {
-    const fechas = {};
-    for (const p of activos) fechas[p.id] = p.fecha;
-    for (const tema of TEMAS) {
-      const lista = (porTema[tema.id] || []).filter((p) => p.id in fechas).map((p) => Object.assign({}, p, { fecha: fechas[p.id] }));
-      if (lista.length < 3) continue;
-      filas.push({ id: tema.id, title: tema.titulo, genre: tema.genre, ref: tema.id, items: lista.slice(0, 30).map(aItem) });
-    }
+  const filas = [];
+  for (const tema of TEMAS) {
+    const lista = await temaConMemoria(tema, "inicio-" + tema.id, PAISES_INICIO, 20);
+    if (!lista.length) continue;
+    filas.push({
+      id: tema.id,
+      title: tema.titulo,
+      genre: tema.genre,
+      ref: tema.id,
+      items: lista.slice(0, 40).map(aItem),
+    });
   }
+  if (!filas.length) throw kino.error("unavailable", "no pude leer los rankings de Apple");
   return filas;
 }
 
 export async function browse(ref, cursor) {
   await null;
-  let lista;
-  if (ref === RECIENTES.id) {
-    const { activos, recientes } = await listaDeRecientes();
-    lista = recientes.length ? recientes : activos;
-  } else {
-    const tema = TEMAS.find((t) => t.id === ref);
-    if (!tema) throw kino.error("not_found");
-    lista = deMemoria("ver-" + tema.id);
-    if (!lista) {
-      const rankings = await enLotes(PAISES_VER_MAS.map((pais) => () => pedirRanking(pais, tema.apple, 50)), 6);
-      lista = await soloActivos(mezclarPaises(rankings, PAISES_VER_MAS));
-      if (lista.length) aMemoria("ver-" + tema.id, lista);
-    }
-  }
+  const tema = TEMAS.find((t) => t.id === ref);
+  if (!tema) throw kino.error("not_found");
+  const lista = await temaConMemoria(tema, "vermas-" + tema.id, PAISES_VER_MAS, 50);
   const desde = Math.max(0, Number(cursor) || 0);
   const resultado = { items: lista.slice(desde, desde + POR_PAGINA).map(aItem) };
   if (desde + POR_PAGINA < lista.length) resultado.next = String(desde + POR_PAGINA);
@@ -478,7 +272,6 @@ export async function search(query) {
           nombre: String(x.collectionName),
           img: String(x.artworkUrl600 || x.artworkUrl100 || ""),
           artista: String(x.artistName || ""),
-          fecha: String(x.releaseDate || "").slice(0, 10),
         }));
     } catch (e) {
       kino.log("Búsqueda en " + pais + " falló: " + (e && e.code ? e.code : e));
@@ -494,35 +287,46 @@ export async function episodes(ref) {
   const id = String(ref || "");
   if (!/^\d+$/.test(id)) throw kino.error("not_found");
 
-  let datos = await episodiosDeApple(id);
-  if (!datos.episodios.length) {
-    if (!datos.feedUrl) throw kino.error("not_found", "el podcast no tiene episodios");
-    const delFeed = await episodiosDelFeed(datos.feedUrl);
-    datos = {
-      serie: {
-        title: delFeed.serie.title || datos.serie.title,
-        overview: delFeed.serie.overview,
-        poster: delFeed.serie.poster || datos.serie.poster,
-      },
-      episodios: delFeed.episodios,
-      feedUrl: datos.feedUrl,
-    };
-  }
-  if (!datos.episodios.length) throw kino.error("not_found", "no hay episodios para reproducir");
+  // Apple da la dirección del RSS del podcast.
+  const busqueda = await kino.fetch(APPLE + "/lookup?entity=podcast&id=" + id, {
+    headers: { Accept: "application/json" },
+    timeoutMs: 8000,
+  });
+  if (!busqueda.ok) throw kino.error("unavailable", "Apple respondió " + busqueda.status);
+  const ficha = ((busqueda.json() || {}).results || [])[0];
+  const feedUrl = ficha && ficha.feedUrl ? String(ficha.feedUrl).replace(/^http:/i, "https:") : "";
+  if (!feedUrl) throw kino.error("not_found", "el podcast no publica su RSS");
 
-  // Casi siempre vienen con el más nuevo primero; el numerado va del más viejo al más nuevo.
-  const primero = datos.episodios[0].fecha;
-  const ultimo = datos.episodios[datos.episodios.length - 1].fecha;
+  let respuesta;
+  try {
+    respuesta = await kino.fetch(feedUrl, {
+      headers: { Accept: "application/rss+xml, application/xml, text/xml, */*", "User-Agent": "Kino-Podcasts/0.1" },
+      timeoutMs: 15000,
+    });
+  } catch (e) {
+    const codigo = e && e.code ? e.code : "";
+    kino.log("No pude abrir el RSS: " + codigo);
+    throw kino.error("unavailable", codigo === "too_large" ? "el RSS pesa demasiado" : "no pude abrir el RSS (" + codigo + ")");
+  }
+  if (!respuesta.ok) throw kino.error("unavailable", "el RSS respondió " + respuesta.status);
+
+  const { serie, episodios } = leerFeed(respuesta.text());
+  if (!episodios.length) throw kino.error("not_found", "el RSS no trae episodios");
+
+  // Los feeds suelen venir con el más nuevo primero; el numerado va del más viejo al más nuevo.
+  const primero = episodios[0].fecha;
+  const ultimo = episodios[episodios.length - 1].fecha;
   const masNuevoPrimero = !(primero && ultimo && primero < ultimo);
-  const ordenados = masNuevoPrimero ? datos.episodios.slice().reverse() : datos.episodios;
+  const ordenados = masNuevoPrimero ? episodios.slice().reverse() : episodios;
   const recortados = ordenados.slice(-MAX_EPISODIOS);
 
-  const series = {};
-  if (datos.serie.title) series.title = datos.serie.title;
-  if (datos.serie.overview) series.overview = datos.serie.overview;
-  if (datos.serie.poster) series.poster = datos.serie.poster;
+  const info = {
+    title: serie.title || (ficha && ficha.collectionName) || undefined,
+    overview: serie.overview || undefined,
+    poster: serie.poster || (ficha && ficha.artworkUrl600) || undefined,
+  };
   return {
-    series,
+    series: info,
     episodes: recortados.map((e, i) => {
       const episodio = { season: 1, number: i + 1, ref: "e:" + e.url, title: e.titulo };
       if (e.fecha) episodio.airDate = e.fecha;
