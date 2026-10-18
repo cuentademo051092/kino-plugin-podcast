@@ -1,4 +1,4 @@
-// Podcasts en español (v0.2.0).
+// Podcasts en español (v0.2.1).
 // Catálogo: rankings y búsqueda públicos de Apple Podcasts (itunes.apple.com).
 // Episodios: el RSS público de cada podcast, que es lo que publica su propio creador.
 
@@ -276,15 +276,14 @@ export async function section(arg) {
   }
   if (!filas.length) throw kino.error("unavailable", "no pude leer los rankings de Apple");
   const actual = SECCION_TABS.find((t) => t.id === tab);
-  return {
-    tabs: SECCION_TABS,
-    tab,
-    rows: filas,
-    hero: {
-      title: enInicio ? "Podcasts en español" : actual.label,
-      text: "Los podcasts más escuchados en español, de Latinoamérica y España.",
-    },
+  // Portada: el primer podcast de la pantalla (los podcasts solo tienen carátula cuadrada).
+  const estrella = (filas[0].items || []).find((it) => it.poster);
+  const hero = {
+    title: estrella ? estrella.title : enInicio ? "Podcasts en español" : actual.label,
+    text: estrella && estrella.overview ? estrella.overview : "Los podcasts más escuchados en español.",
   };
+  if (estrella) hero.image = estrella.poster;
+  return { tabs: SECCION_TABS, tab, rows: filas, hero };
 }
 
 export async function browse(ref, cursor) {
