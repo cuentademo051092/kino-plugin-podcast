@@ -1,4 +1,4 @@
-// Podcasts en español (v0.1.0).
+// Podcasts en español (v0.2.0).
 // Catálogo: rankings y búsqueda públicos de Apple Podcasts (itunes.apple.com).
 // Episodios: el RSS público de cada podcast, que es lo que publica su propio creador.
 
@@ -240,6 +240,51 @@ export async function home() {
   }
   if (!filas.length) throw kino.error("unavailable", "no pude leer los rankings de Apple");
   return filas;
+}
+
+// Pantalla propia del plugin (apiVersion 6): botón en el inicio de Kino con pestañas.
+// Kino llama section({ tab }) y espera { tabs, tab, rows, hero? }.
+const ETIQUETAS_TAB = {
+  noticias: "Noticias",
+  historia: "Historia y misterio",
+  comedia: "Comedia",
+  tecnologia: "Tecnología y ciencia",
+};
+const SECCION_TABS = [{ id: "inicio", label: "Inicio" }].concat(
+  TEMAS.map((t) => ({ id: t.id, label: ETIQUETAS_TAB[t.id] || t.titulo.slice(0, 24) }))
+);
+
+export async function section(arg) {
+  await null;
+  const pedido = arg && arg.tab ? String(arg.tab) : "inicio";
+  const tab = SECCION_TABS.some((t) => t.id === pedido) ? pedido : "inicio";
+  const enInicio = tab === "inicio";
+  const temas = enInicio ? TEMAS : TEMAS.filter((t) => t.id === tab);
+  const filas = [];
+  for (const tema of temas) {
+    const lista = enInicio
+      ? await temaConMemoria(tema, "inicio-" + tema.id, PAISES_INICIO, 20)
+      : await temaConMemoria(tema, "vermas-" + tema.id, PAISES_VER_MAS, 50);
+    if (!lista.length) continue;
+    filas.push({
+      id: tema.id,
+      title: tema.titulo,
+      genre: tema.genre,
+      ref: tema.id,
+      items: lista.slice(0, enInicio ? 40 : 100).map(aItem),
+    });
+  }
+  if (!filas.length) throw kino.error("unavailable", "no pude leer los rankings de Apple");
+  const actual = SECCION_TABS.find((t) => t.id === tab);
+  return {
+    tabs: SECCION_TABS,
+    tab,
+    rows: filas,
+    hero: {
+      title: enInicio ? "Podcasts en español" : actual.label,
+      text: "Los podcasts más escuchados en español, de Latinoamérica y España.",
+    },
+  };
 }
 
 export async function browse(ref, cursor) {
