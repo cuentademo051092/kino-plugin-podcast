@@ -1,9 +1,10 @@
 {
   "id": "podcasts-latam",
   "name": "Podcasts en español",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "apiVersion": 4,
   "entry": "plugin.js",
+  "icon": "icon.png",
   "description": "Podcasts gratis en español, sobre todo de Latinoamérica y también de España: noticias, historia y misterio, comedia, tecnología y ciencia. Busca cualquier podcast y escucha o descarga sus episodios.",
   "hosts": [
     "itunes.apple.com",
