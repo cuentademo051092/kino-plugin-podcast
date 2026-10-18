@@ -1,4 +1,4 @@
-// Podcasts en español (v0.2.1).
+// Podcasts en español (v0.2.2).
 // Catálogo: rankings y búsqueda públicos de Apple Podcasts (itunes.apple.com).
 // Episodios: el RSS público de cada podcast, que es lo que publica su propio creador.
 
@@ -127,7 +127,8 @@ async function podcastsDelTema(tema, paises, cuantos) {
 }
 
 // Guarda el resultado de cada tema unas horas para no repetir las mismas peticiones.
-async function temaConMemoria(tema, clave, paises, cuantos) {
+// La memoria de Kino tiene un tope total (256 KB), por eso se guarda solo una parte y sin pasarse.
+async function temaConMemoria(tema, clave, paises, cuantos, tope) {
   const guardado = kino.storage.get(clave);
   if (typeof guardado === "string") {
     try {
@@ -139,9 +140,14 @@ async function temaConMemoria(tema, clave, paises, cuantos) {
       kino.log("La memoria de " + clave + " no se pudo leer: " + e);
     }
   }
-  const lista = await podcastsDelTema(tema, paises, cuantos);
+  const lista = (await podcastsDelTema(tema, paises, cuantos)).slice(0, tope || 100);
   if (lista.length) {
-    kino.storage.set(clave, JSON.stringify(lista.map((p) => [p.id, p.nombre, p.img, p.artista])), { ttlMs: SEIS_HORAS });
+    try {
+      const filas = lista.map((p) => [p.id, p.nombre.slice(0, 80), p.img, p.artista.slice(0, 60)]);
+      kino.storage.set(clave, JSON.stringify(filas), { ttlMs: SEIS_HORAS });
+    } catch (e) {
+      kino.log("No se pudo guardar " + clave + " en la memoria: " + e);
+    }
   }
   return lista;
 }
@@ -228,7 +234,7 @@ export async function home() {
   await null;
   const filas = [];
   for (const tema of TEMAS) {
-    const lista = await temaConMemoria(tema, "inicio-" + tema.id, PAISES_INICIO, 20);
+    const lista = await temaConMemoria(tema, "inicio-" + tema.id, PAISES_INICIO, 20, 60);
     if (!lista.length) continue;
     filas.push({
       id: tema.id,
@@ -263,8 +269,8 @@ export async function section(arg) {
   const filas = [];
   for (const tema of temas) {
     const lista = enInicio
-      ? await temaConMemoria(tema, "inicio-" + tema.id, PAISES_INICIO, 20)
-      : await temaConMemoria(tema, "vermas-" + tema.id, PAISES_VER_MAS, 50);
+      ? await temaConMemoria(tema, "inicio-" + tema.id, PAISES_INICIO, 20, 60)
+      : await temaConMemoria(tema, "vermas-" + tema.id, PAISES_VER_MAS, 25, 100);
     if (!lista.length) continue;
     filas.push({
       id: tema.id,
@@ -290,7 +296,7 @@ export async function browse(ref, cursor) {
   await null;
   const tema = TEMAS.find((t) => t.id === ref);
   if (!tema) throw kino.error("not_found");
-  const lista = await temaConMemoria(tema, "vermas-" + tema.id, PAISES_VER_MAS, 50);
+  const lista = await temaConMemoria(tema, "vermas-" + tema.id, PAISES_VER_MAS, 25, 100);
   const desde = Math.max(0, Number(cursor) || 0);
   const resultado = { items: lista.slice(desde, desde + POR_PAGINA).map(aItem) };
   if (desde + POR_PAGINA < lista.length) resultado.next = String(desde + POR_PAGINA);
